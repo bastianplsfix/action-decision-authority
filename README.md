@@ -40,8 +40,10 @@ import type { Rule, Facts } from "rule-evaluation-lib"
 // Define rules
 const rules: Rule[] = [
   {
+    combination: "any",
     conditions: [
-      { field: "user.age", operator: "greaterThan", value: 18 }
+      { field: "user.age", operator: "greaterThan", value: 18 },
+      { field: "user.age", operator: "equals", value: 18 }
     ],
     action: "adult"
   },
