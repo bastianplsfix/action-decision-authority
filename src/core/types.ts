@@ -1,9 +1,5 @@
 /**
- * Action Decision Authority – Rule Engine Types
- */
-
-/**
- * The type of comparison operators supported by the rule engine.
+ * The type of comparison operators supported by the action-decision authority.
  */
 export type Operator =
   | 'equals'
@@ -19,39 +15,33 @@ export type Operator =
  * A single condition that must be met within a rule.
  */
 export type Condition = {
-  /** The field name in the facts (supports dot-notation for nested properties). */
+  /** The key (dot-notation supported) whose value will be compared. */
   field: string
-  /** The comparison operator to use. */
+  /** The comparison operator. */
   operator: Operator
-  /** The value to compare against the fact’s value. */
-  value: any
+  /** The value to compare against. */
+  value: unknown
 }
 
 /**
- * A group of conditions allowing you to specify logical operators.
+ * Allowed modes for combining conditions.
  */
-export interface ConditionGroup {
-  /** The logical operator for this group: "all" (AND) or "any" (OR). */
-  operator: 'all' | 'any'
-  /** The conditions (which can be simple conditions or nested groups). */
-  conditions: RuleCondition[]
-}
+export type RuleCombination = 'all' | 'any'
 
 /**
- * A rule condition can be either a simple condition or a group of conditions.
- */
-export type RuleCondition = Condition | ConditionGroup
-
-/**
- * A rule containing conditions and an action.
- * If conditions is provided as an array, it defaults to "all" (AND) logic.
+ * A rule containing an array of conditions, an action string, and an optional combination mode.
+ * If no combination is provided, the default is "all".
  */
 export type Rule = {
-  conditions: RuleCondition | RuleCondition[]
+  /** Combination mode (defaults to "all" if omitted). */
+  combination?: RuleCombination
+  /** One or more conditions for this rule. */
+  conditions: Condition[]
+  /** The action string to return when the rule matches. */
   action: string
 }
 
 /**
- * A record of key-value pairs representing the data to be evaluated.
+ * Facts are the data evaluated by the engine. Use any plain object.
  */
-export type Facts = Record<string, any>
+export type Facts = object

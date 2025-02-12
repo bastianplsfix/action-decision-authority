@@ -1,31 +1,40 @@
-import React from 'react'
+import { useMemo, useRef } from 'react'
+import isEqual from 'fast-deep-equal'
+
+import { evaluate } from '../core/evaluate'
 import type { Rule, Facts } from '../core/types'
-import { evaluate, deepEqual, type EngineOptions } from '../core/evaluate'
 
 /**
- * A custom hook that memoizes a value using deep comparison.
+ * Deep comparison memo hook using fast-deep-equal.
  */
 function useDeepCompareMemo<T>(value: T): T {
-  const ref = React.useRef<T>(value)
-  if (!deepEqual(value, ref.current)) {
+  const ref = useRef<T>(value)
+  if (!isEqual(ref.current, value)) {
     ref.current = value
   }
   return ref.current
 }
 
 /**
- * React hook that evaluates rules (using `evaluate`) and returns the resulting action.
- * Accepts an options object for debug flags, custom operators, etc.
+ * A hook that evaluates an array of rules against the provided facts.
+ * Returns the action of the first matching rule (or null if none match).
+ *
+ * This hook now accepts an optional third parameter "options",
+ * for example: { debug: true }.
+ *
+ * @example:
+ *   const action = useEvaluate(rules, applicationData, { debug: true });
  */
 export function useEvaluate(
   rules: Rule[],
   facts: Facts,
-  options?: EngineOptions,
+  options: { debug?: boolean } = {},
 ): string | null {
-  const stableFacts = useDeepCompareMemo(facts)
-  const result = React.useMemo(
-    () => evaluate(rules, stableFacts, options),
-    [rules, stableFacts, options],
+  const memoizedRules = useDeepCompareMemo(rules)
+  const memoizedFacts = useDeepCompareMemo(facts)
+
+  return useMemo(
+    () => evaluate(memoizedRules, memoizedFacts, options),
+    [memoizedRules, memoizedFacts, options.debug],
   )
-  return result
 }

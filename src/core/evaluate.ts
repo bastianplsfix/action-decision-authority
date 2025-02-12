@@ -1,185 +1,154 @@
-import type {
-  Rule,
-  Facts,
-  RuleCondition,
-  Condition,
-  ConditionGroup,
+import { getProperty } from 'dot-prop'
+
+import type { Operator, Condition, Rule, RuleCombination, Facts } from './types'
+
+/**
+ * Mapping of operator names to their respective evaluation functions.
+ */
+const operatorFunctions: Record<
   Operator,
-} from './types'
-
-/**
- * Function type for comparing a fact value to a condition value.
- */
-export type OperatorFunction = (factValue: any, conditionValue: any) => boolean
-
-/**
- * Options for the engine.
- */
-export interface EngineOptions {
-  debug?: boolean
-  customOperators?: Partial<Record<Operator, OperatorFunction>>
-}
-
-/**
- * Default operator functions.
- */
-const defaultOperatorFunctions: Record<Operator, OperatorFunction> = {
-  equals: (fact, cond) => fact === cond,
-  notEquals: (fact, cond) => fact !== cond,
-  greaterThan: (fact, cond) =>
-    typeof fact === 'number' && typeof cond === 'number' && fact > cond,
-  lessThan: (fact, cond) =>
-    typeof fact === 'number' && typeof cond === 'number' && fact < cond,
-  contains: (fact, cond) => {
-    if (typeof fact === 'string') return fact.includes(cond)
-    if (Array.isArray(fact)) return fact.includes(cond)
-    return false
+  (fact: unknown, conditionValue: unknown) => boolean
+> = {
+  equals: (fact, value) => fact === value,
+  notEquals: (fact, value) => fact !== value,
+  greaterThan: (fact, value) => {
+    if (typeof fact !== 'number' || typeof value !== 'number') {
+      throw new Error(
+        `Operator 'greaterThan' expects both operands to be numbers. Received: ${typeof fact} and ${typeof value}.`,
+      )
+    }
+    return fact > value
   },
-  startsWith: (fact, cond) => typeof fact === 'string' && fact.startsWith(cond),
-  endsWith: (fact, cond) => typeof fact === 'string' && fact.endsWith(cond),
-  in: (fact, cond) => Array.isArray(cond) && cond.includes(fact),
+  lessThan: (fact, value) => {
+    if (typeof fact !== 'number' || typeof value !== 'number') {
+      throw new Error(
+        `Operator 'lessThan' expects both operands to be numbers. Received: ${typeof fact} and ${typeof value}.`,
+      )
+    }
+    return fact < value
+  },
+  contains: (fact, value) => {
+    if (typeof fact === 'string' && typeof value === 'string') {
+      return fact.includes(value)
+    }
+    if (Array.isArray(fact)) {
+      return fact.includes(value)
+    }
+    throw new Error(
+      `Operator 'contains' expects a string (or array for fact), but got types ${typeof fact} and ${typeof value}.`,
+    )
+  },
+  startsWith: (fact, value) => {
+    if (typeof fact === 'string' && typeof value === 'string') {
+      return fact.startsWith(value)
+    }
+    throw new Error(
+      `Operator 'startsWith' expects both operands to be strings.`,
+    )
+  },
+  endsWith: (fact, value) => {
+    if (typeof fact === 'string' && typeof value === 'string') {
+      return fact.endsWith(value)
+    }
+    throw new Error(`Operator 'endsWith' expects both operands to be strings.`)
+  },
+  in: (fact, value) => {
+    if (Array.isArray(value)) {
+      return value.includes(fact)
+    }
+    throw new Error(`Operator 'in' expects the condition value to be an array.`)
+  },
 }
 
 /**
- * Merges custom operator functions (if provided) with the defaults.
- */
-function getOperators(
-  options?: EngineOptions,
-): Record<Operator, OperatorFunction> {
-  return options?.customOperators
-    ? { ...defaultOperatorFunctions, ...options.customOperators }
-    : defaultOperatorFunctions
-}
-
-/**
- * Retrieves a nested value from an object given a dot-notated path.
- * Supports any number of nesting levels.
+ * Retrieves a nested value from an object using a dot-notated string.
  * Example: getNestedValue(obj, "user.age") returns obj.user.age.
  */
-export function getNestedValue(obj: any, path: string): any {
-  return path
-    .split('.')
-    .reduce((prev, key) => (prev !== undefined ? prev[key] : undefined), obj)
+function getNestedValue(obj: object, path: string): unknown {
+  const value = getProperty(obj, path)
+  if (value === undefined) {
+    console.warn(
+      `Warning: The field "${path}" is missing in the provided object.`,
+    )
+  }
+  return value
 }
 
 /**
- * Recursively evaluates a RuleCondition (either a simple condition or a condition group).
+ * Evaluates a single condition against the provided facts.
+ * If an error occurs, the functions log the error and returns false.
  */
-function matchCondition(
-  cond: RuleCondition,
-  facts: Facts,
-  operators: Record<Operator, OperatorFunction>,
-  debug: boolean = false,
-): boolean {
-  if (
-    (cond as ConditionGroup).operator !== undefined &&
-    (cond as ConditionGroup).conditions !== undefined
-  ) {
-    const group = cond as ConditionGroup
-    if (group.operator === 'all') {
-      return group.conditions.every((c) =>
-        matchCondition(c, facts, operators, debug),
-      )
-    } else if (group.operator === 'any') {
-      return group.conditions.some((c) =>
-        matchCondition(c, facts, operators, debug),
+function decide(condition: Condition, facts: Facts): boolean {
+  const factValue = getNestedValue(facts, condition.field)
+  const operatorFn = operatorFunctions[condition.operator]
+
+  if (!operatorFn) {
+    console.error(`Unsupported operator: ${condition.operator}`)
+    return false
+  }
+
+  try {
+    return operatorFn(factValue, condition.value)
+  } catch (error) {
+    if (error instanceof Error) {
+      console.error(
+        `Error evaluating condition for field "${condition.field}": ${error.message}`,
       )
     } else {
-      if (debug) console.warn(`Unknown group operator: ${group.operator}`)
-      return false
-    }
-  } else {
-    const simpleCond = cond as Condition
-    const factValue = getNestedValue(facts, simpleCond.field)
-    const operatorFn = operators[simpleCond.operator]
-    if (!operatorFn) {
-      if (debug)
-        console.warn(`Operator "${simpleCond.operator}" not implemented.`)
-      return false
-    }
-    const result = operatorFn(factValue, simpleCond.value)
-    if (debug) {
-      console.log(
-        `Condition: field="${simpleCond.field}", operator="${simpleCond.operator}", ` +
-          `factValue=${JSON.stringify(factValue)}, condition.value=${JSON.stringify(simpleCond.value)} -> ${result}`,
+      console.error(
+        `Unexpected error evaluating condition for field "${condition.field}": ${error}`,
       )
     }
-    return result
+    return false
   }
 }
 
 /**
- * Evaluates a RuleCondition (or an array of conditions). If an array is provided,
- * it is treated as an "all" grouping by default.
+ * Checks whether conditions match the facts using the provided combination:
+ * - "all": All conditions must match.
+ * - "any": At least one condition must match.
  */
-function conditionsMatch(
-  conditions: RuleCondition | RuleCondition[],
+export function conditionsMatch(
+  conditions: Condition[],
   facts: Facts,
-  operators: Record<Operator, OperatorFunction>,
-  debug: boolean = false,
+  combination: RuleCombination,
 ): boolean {
-  if (Array.isArray(conditions)) {
-    return conditions.every((c) => matchCondition(c, facts, operators, debug))
+  if (combination === 'all') {
+    return conditions.every((condition) => decide(condition, facts))
   }
-  return matchCondition(conditions, facts, operators, debug)
+  // For "any" combination, return true if at least one condition passes.
+  return conditions.some((condition) => decide(condition, facts))
 }
 
 /**
- * Core evaluation function renamed to `evaluate`.
- * Evaluates an array of rules against the provided facts.
- * Returns the action of the first rule that matches, or null if none match.
- * Accepts an options object for debugging and custom operators.
+ * Evaluates an array of rules against a given set of facts.
+ * Returns the action of the first matching rule, or null if none match.
+ *
+ * An optional `options` parameter is provided; if options.debug is true,
+ * the function logs the matched rule and its index to the console.
  */
 export function evaluate(
   rules: Rule[],
   facts: Facts,
-  options?: EngineOptions,
+  options: { debug?: boolean } = {},
 ): string | null {
-  const debug = options?.debug ?? false
-  const operators = getOperators(options)
+  for (let i = 0; i < rules.length; i++) {
+    const rule = rules[i]
+    if (!rule) continue
 
-  for (const rule of rules) {
-    if (debug) {
-      console.log(`Evaluating rule: "${rule.action}"`)
-    }
-    if (!conditionsMatch(rule.conditions, facts, operators, debug)) {
+    const combination: RuleCombination = rule.combination ?? 'all'
+    if (!conditionsMatch(rule.conditions, facts, combination)) {
       continue
     }
-    if (debug) {
-      console.log(`\u2714 Matched rule action: "${rule.action}"`)
+
+    if (options.debug) {
+      console.debug(`Rule matched at index ${i}:`, rule)
     }
+
     return rule.action
   }
-  if (debug) {
-    console.log('\u2716 No rule matched')
+  if (options.debug) {
+    console.debug('No rule matched the provided facts.')
   }
   return null
-}
-
-/**
- * A simple deep equality check for objects and arrays.
- * Designed to be fast for typical use cases.
- */
-export function deepEqual(a: any, b: any): boolean {
-  if (a === b) return true
-  if (typeof a !== typeof b) return false
-  if (typeof a !== 'object' || a === null || b === null) return false
-  if (Array.isArray(a) !== Array.isArray(b)) return false
-
-  if (Array.isArray(a)) {
-    if (a.length !== b.length) return false
-    for (let i = 0; i < a.length; i++) {
-      if (!deepEqual(a[i], b[i])) return false
-    }
-    return true
-  }
-
-  const keysA = Object.keys(a)
-  const keysB = Object.keys(b)
-  if (keysA.length !== keysB.length) return false
-  for (const key of keysA) {
-    if (!b.hasOwnProperty(key)) return false
-    if (!deepEqual(a[key], b[key])) return false
-  }
-  return true
 }
